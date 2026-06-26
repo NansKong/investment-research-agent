@@ -10,11 +10,11 @@ a bull case, a bear case, risks, a financial snapshot, and the sources it actual
 
 You type a company name into a single input box. Behind the scenes:
 
-1. A **research agent** (LangGraph.js ReAct loop) decides what to search for, calls a live
-   web search tool (and a best-effort stock quote tool) several times, and writes up a
-   structured research brief — overview, financials/funding, competitive landscape, recent
-   news, risks.
-2. A **decision step** takes that brief and renders a strict, schema-validated verdict:
+1. A **research agent** (LangGraph.js StateGraph loop) outputs one JSON action per turn —
+   `web_search`, `stock_quote`, or `finish` — calling live tools and building up a
+   structured research brief covering overview, financials/funding, competitive landscape,
+   recent news, and risks.
+2. A **decision step** takes that brief and renders a strict, Zod-validated verdict:
    `INVEST`, `PASS`, or `WATCH`, with confidence, a thesis, bull/bear points, risks,
    catalysts, and a financial snapshot table.
 3. The frontend streams the agent's progress live (as it researches) and then renders the
@@ -40,14 +40,11 @@ cp .env.example .env.local
 Fill in `.env.local`:
 
 ```bash
-LLM_PROVIDER=openai          # or "anthropic"
-REPLICATE_API_TOKEN=sk-...        # required if LLM_PROVIDER=openai (default)
-OPENAI_MODEL=gpt-4o-mini     # optional override
+# LLM — runs GPT-4.1-mini via Replicate
+REPLICATE_API_TOKEN=r8_...   # get one at https://replicate.com/account/api-tokens
 
-ANTHROPIC_API_KEY=           # only if LLM_PROVIDER=anthropic
-ANTHROPIC_MODEL=claude-sonnet-4-6
-
-TAVILY_API_KEY=tvly-...      # free tier at https://tavily.com — powers real web search
+# Web search — powers the agent's web_search action
+TAVILY_API_KEY=tvly-...      # free tier at https://tavily.com
 ```
 
 Then:
@@ -58,7 +55,7 @@ npm run dev
 
 Open `http://localhost:3000`, type a company name, and submit.
 
-> **No `TAVILY_API_KEY`?** The agent still runs — the `web_search` tool tells the model
+> **No `TAVILY_API_KEY`?** The agent still runs — the `web_search` function tells the model
 > search is unavailable, and the model is instructed to say so explicitly in its analysis
 > and lower its confidence accordingly, rather than silently making things up.
 
@@ -90,38 +87,46 @@ on the Node.js runtime, with `maxDuration` raised to 120s since multi-step resea
                                               ┌─────────────────────────────────┐
                                               │   LangGraph.js StateGraph        │
                                               │                                   │
-                                              │   ┌────────┐ tool calls ┌──────┐  │
-                                              │   │ agent  │──────────▶│ tools │  │
-                                              │   │ (LLM)  │◀──────────│ node  │  │
-                                              │   └───┬────┘  results  └──────┘  │
-                                              │       │ no more tool calls        │
+                                              │   ┌────────┐  JSON action         │
+                                              │   │ agent  │──── parse ──┐        │
+                                              │   │(Repli- │◀── result ──┤        │
+                                              │   │ cate)  │             │        │
+                                              │   └───┬────┘   webSearch()        │
+                                              │       │        stockQuote()       │
+                                              │       │ action = "finish"         │
                                               │       ▼                            │
                                               │  research brief (text)            │
                                               └───────────────┬───────────────────┘
                                                                │
                                                                ▼
                                               ┌─────────────────────────────────┐
-                                              │ Decision model                   │
-                                              │ .withStructuredOutput(zod schema)│
-                                              │ → INVEST / PASS / WATCH + reasoning│
+                                              │ Decision model (ChatReplicate)   │
+                                              │ → extractJson + Zod safeParse    │
+                                              │ → INVEST / PASS / WATCH          │
                                               └─────────────────────────────────┘
 ```
 
-- **Research phase** — a `StateGraph` (LangGraph.js) with two nodes: `agent` (the LLM,
-  bound to tools) and `tools` (a `ToolNode` running whichever tools the LLM called).
-  A conditional edge keeps looping `agent → tools → agent` until the model stops calling
-  tools (or hits a safety cap of 8 tool-calling turns), at which point it must have written
-  a plain-text research brief. This is a standard ReAct pattern, kept deliberately small
-  and inspectable rather than reaching for a prebuilt agent abstraction.
-- **Tools**: `web_search` (Tavily REST API — real, current web results) and `stock_quote`
-  (a free, no-key Stooq lookup for a quick public-market sanity check). The model decides
-  when and how many times to call each; the system prompt nudges it to cover overview,
-  financials, competitors, recent news, and risks with multiple targeted queries.
-- **Decision phase** — a second LLM call, *not* in the tool loop, that receives only the
-  finished research brief and is forced into a strict Zod schema via
-  `.withStructuredOutput(...)`. Separating "go gather facts" from "now make a judgment call"
-  keeps the verdict grounded in one finished document instead of getting decided mid-search,
-  and makes the decision step trivially easy to validate/parse.
+- **LLM provider** — `ChatReplicate`, a custom `SimpleChatModel` subclass
+  (`lib/agent/chat-replicate.ts`) that calls Replicate's hosted `openai/gpt-4.1-mini`. It
+  extends LangChain's `SimpleChatModel` so it plugs into `.invoke(state.messages)` the same
+  way `ChatOpenAI` would. No OpenAI or Anthropic API keys are needed.
+- **Research phase** — a `StateGraph` (LangGraph.js) with a single `agent` node. Instead of
+  native tool calling + `ToolNode`, the agent outputs one JSON action per turn
+  (`{"action": "web_search", "query": "..."}`, `{"action": "stock_quote", "ticker": "..."}`,
+  or `{"action": "finish", "brief": "..."}`). The graph loop parses the JSON with
+  `extractJson()`, dispatches the corresponding plain async function, appends the result as
+  a `HumanMessage`, and loops back. If the model returns invalid JSON, a retry message is
+  appended and it loops back — with a hard cap of 5 agent turns (total AI messages) to
+  guarantee termination even if the model gets stuck.
+- **Tools**: `webSearch()` (Tavily REST API — real, current web results) and `stockQuote()`
+  (a free, no-key Stooq lookup for a quick public-market sanity check). Both are plain
+  `async` functions — no LangChain `tool()` wrapper — called directly by the graph loop
+  based on the parsed action.
+- **Decision phase** — a second `ChatReplicate` call (temperature 0.1), *not* in the graph
+  loop, that receives only the finished research brief. Instead of `.withStructuredOutput()`,
+  the raw response is parsed with `extractJson()` and validated with
+  `InvestmentDecisionSchema.safeParse()`. On validation failure, the error is fed back and
+  the model retries once.
 - **Streaming** — the route handler returns a `ReadableStream` of newline-delimited JSON:
   `{"type":"log", ...}` lines as the agent works, then one `{"type":"result", ...}` line
   with the full structured payload (or `{"type":"error", ...}` on failure). The frontend
@@ -144,21 +149,40 @@ components/
   VerdictStamp.tsx         the rotated INVEST/PASS/WATCH stamp
   ResearchMemo.tsx         full memo layout (thesis, bull/bear, risks, sources…)
 lib/agent/
+  chat-replicate.ts        ChatReplicate — SimpleChatModel wrapper around Replicate
+  json-utils.ts            extractJson() — pull JSON from free-form model output
   types.ts                 Zod schema for the structured decision + shared types
-  tools.ts                 web_search (Tavily) + stock_quote (Stooq) tool defs
-  prompts.ts                system prompts for research vs. decision phases
-  graph.ts                  the LangGraph StateGraph + orchestration logic
+  tools.ts                 webSearch() + stockQuote() — plain async functions
+  prompts.ts               system prompts for research vs. decision phases
+  graph.ts                 the LangGraph StateGraph + orchestration logic
 ```
 
 ---
 
 ## Key decisions & trade-offs
 
+- **Replicate instead of direct OpenAI/Anthropic API keys.** Using `openai/gpt-4.1-mini`
+  hosted on Replicate means only one API token is needed, with no separate OpenAI or
+  Anthropic billing. The trade-off is slightly higher latency per prediction (Replicate
+  cold-start/queue time) and no native tool calling — which is why the agent uses a
+  JSON-action protocol instead.
+- **JSON-action protocol instead of native tool calling.** Since Replicate's model hosting
+  doesn't support OpenAI-style `tool_calls` in the response, the agent prompt instructs the
+  model to reply with a JSON object specifying the action. `extractJson()` parses it, with
+  retry logic for malformed output. This is simpler than it sounds and works reliably with
+  `gpt-4.1-mini`, at the cost of needing a retry path for the occasional non-JSON response.
+- **Plain async functions instead of LangChain `tool()` wrappers.** Without native tool
+  calling, `ToolNode` is unnecessary. `webSearch()` and `stockQuote()` are just async
+  functions called directly in the graph loop — same fetch logic, less abstraction.
 - **Two-phase agent (research → decide) instead of one giant agent loop.** A single agent
   that researches *and* decides in the same loop tends to lock in a verdict early and
   rationalize backward as it keeps searching. Splitting "gather" from "judge" into two LLM
-  calls, with the judgment call forced through a strict schema, produced more consistent,
+  calls, with the judgment call validated through a Zod schema, produced more consistent,
   better-grounded verdicts in testing — at the cost of an extra LLM call per run.
+- **Zod `safeParse` + retry instead of `.withStructuredOutput()`.** Since `ChatReplicate`
+  doesn't support structured output natively, the decision step calls the model, extracts
+  JSON, runs `safeParse`, and on failure feeds the Zod validation errors back into the
+  prompt for one retry. This handles the same role with explicit error recovery.
 - **Direct REST call to Tavily instead of `@langchain/community`'s wrapper.** The community
   package pulls in a long, fragile dependency tree (it transitively wants `better-sqlite3`,
   `typeorm`, etc. for unrelated integrations) that caused peer-dependency resolution errors.
@@ -166,24 +190,13 @@ lib/agent/
   reason about.
 - **NDJSON streaming over a hand-rolled WebSocket/SSE setup.** Good enough to show live
   progress without pulling in a pub/sub layer or a separate server process — appropriate
-  for a single-request, single-response agent run. A production version with concurrent
-  users would likely move to SSE with proper backpressure handling or a queue.
-- **Stock data is best-effort and free, not authoritative.** I deliberately did not wire up
-  a paid market-data API (e.g. a real fundamentals provider). For a take-home, free/no-key
-  `stooq.com` quotes are a reasonable stand-in for "the agent can ground a number in a real
-  source," but real diligence would use a licensed data vendor for anything quantitative.
-- **No persistence / no auth / no multi-turn chat.** The brief asked for "takes a company
-  name, researches, decides" — I optimized for that one flow being solid (real search,
-  real reasoning, real structured output, deployable) rather than spreading effort across
-  a login system, a history page, or a database, none of which the task asked for.
-- **Confidence is the model's own self-estimate, not a calibrated score.** It's a number
-  between 0–1 it's prompted to set honestly (and to lower when research was thin), but it
-  is not independently calibrated against historical outcomes — that would need backtesting
-  infrastructure well beyond this scope.
-- **No retries/backoff on tool failures beyond graceful tool-level error messages.** A
-  failed search returns a string explaining the failure so the model can route around it
-  (try a different query, or note the gap), rather than the whole run crashing — but there's
-  no exponential-backoff retry policy.
+  for a single-request, single-response agent run.
+- **Agent turn cap (5) instead of tool-call cap.** The safety limit counts every AI message,
+  not just successful tool calls. This guarantees termination even if the model gets stuck
+  on bad JSON or unknown actions — it won't loop forever.
+- **No persistence / no auth / no multi-turn chat.** Optimized for the one flow of "takes a
+  company name, researches, decides" being solid rather than spreading effort across a login
+  system, a history page, or a database.
 
 ### What I left out (and would add given more time)
 
@@ -191,7 +204,7 @@ lib/agent/
   free spot-quote lookup.
 - Parallel/fan-out search (multiple `web_search` calls issued concurrently per turn) instead
   of one tool call at a time, to cut latency.
-- A "show your work" expandable view of the full research brief and raw tool call/response
+- A "show your work" expandable view of the full research brief and raw action/response
   trace (the data is already collected in `researchLog` — it's just not surfaced in the UI).
 - Caching identical company queries for some TTL, since a re-run today should mostly agree
   with a re-run an hour ago.
@@ -204,11 +217,10 @@ lib/agent/
 
 These are illustrative example outputs in the agent's actual output shape (i.e. straight from
 `InvestmentDecisionSchema`) — produced by working through the agent's prompts and tool
-outputs manually, since this build environment has no outbound network access to OpenAI/
-Tavily to execute a live run end-to-end. Once you add real API keys, running these same
-company names through the app will produce a live equivalent grounded in that day's actual
-search results — likely with different specifics than below, since the underlying facts
-the agent finds will differ over time.
+outputs manually. Once you add real API keys, running these same company names through the
+app will produce a live equivalent grounded in that day's actual search results — likely
+with different specifics than below, since the underlying facts the agent finds will differ
+over time.
 
 ### 1. "Anduril Industries" → `WATCH`
 
@@ -264,22 +276,15 @@ actually find.)*
 
 ## What I would improve with more time
 
-1. **Make example runs live, not illustrative** — wire this up to a real OpenAI + Tavily
-   key in an environment with outbound network access and capture genuine transcripts.
-2. **Surface the full research trace in the UI** (collapsible "show the analyst's notes"
+1. **Surface the full research trace in the UI** (collapsible "show the analyst's notes"
    section) instead of only a one-line-per-step progress feed.
-3. **Add a real fundamentals data source** for any company with public filings, and clearly
+2. **Add a real fundamentals data source** for any company with public filings, and clearly
    visually distinguish "verified financial data" from "claims found in news coverage."
-4. **Parallelize search calls** within a single research turn to cut wall-clock time.
-5. **Add a lightweight eval harness**: a fixed list of test companies + expected verdict
+3. **Parallelize search calls** within a single research turn to cut wall-clock time.
+4. **Add a lightweight eval harness**: a fixed list of test companies + expected verdict
    direction, run against the agent on every prompt change, to catch regressions before
    they ship.
-6. **Memory across a session** — let a user ask a follow-up question about the memo
+5. **Memory across a session** — let a user ask a follow-up question about the memo
    ("what about their debt load?") without re-running the whole pipeline from scratch.
-
----
-
-## Bonus: build process / LLM chat log
-
-This project was built in conversation with Claude (Anthropic). The full chat transcript
-for this build session is included as `CHAT_LOG.md` in this submission.
+6. **Bump `MAX_RESEARCH_STEPS`** once latency is optimized — 5 turns is a conservative cap;
+   more turns would allow deeper research coverage.
