@@ -6,6 +6,10 @@ a bull case, a bear case, risks, a financial snapshot, and the sources it actual
 
 ---
 
+Live link: https://researchdesk-pi.vercel.app/
+
+---
+
 ## Overview
 
 You type a company name into a single input box. Behind the scenes:
