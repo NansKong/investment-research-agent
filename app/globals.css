@@ -68,3 +68,66 @@ body {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
+
+/* ── Print / PDF export ────────────────────────────────── */
+@media print {
+  /* Hide everything that isn't the memo */
+  body > * {
+    visibility: hidden;
+  }
+
+  /* But show the memo and all its children */
+  [data-memo],
+  [data-memo] * {
+    visibility: visible !important;
+  }
+
+  /* Position memo at the top of the page */
+  [data-memo] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+  }
+
+  /* Clean page setup */
+  @page {
+    size: A4;
+    margin: 1.5cm 2cm;
+  }
+
+  html, body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Keep stamp rotation visible in print */
+  .stamp-animate {
+    animation: none;
+    opacity: 1;
+  }
+
+  /* Prevent page breaks inside sections */
+  section {
+    break-inside: avoid;
+  }
+
+  /* Hide the download button */
+  #download-report-btn {
+    display: none !important;
+  }
+
+  /* Ensure links show their URL in print */
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.7em;
+    color: var(--ink);
+    opacity: 0.5;
+    word-break: break-all;
+  }
+}

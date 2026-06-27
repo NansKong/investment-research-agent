@@ -1,8 +1,9 @@
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
+import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { ChatReplicate } from "./chat-replicate";
 import { extractJson } from "./json-utils";
-import { webSearch, stockQuote, bindSourceSink } from "./tools";
+import { allTools, bindSourceSink } from "./tools";
 import { RESEARCH_SYSTEM_PROMPT, DECISION_SYSTEM_PROMPT } from "./prompts";
 import { InvestmentDecisionSchema, type AgentRunResult, type Source } from "./types";
 
@@ -13,101 +14,39 @@ const MAX_RESEARCH_STEPS = 10;
  * request-scoped source sink and emit log lines via the onLog callback.
  */
 function buildGraph(onLog: (line: string) => void) {
-  const researchModel = new ChatReplicate({ temperature: 0.2 });
+  const researchModel = new ChatReplicate({ temperature: 0.2 }).bindTools(allTools);
+  const toolNode = new ToolNode(allTools);
 
-  async function agentNode(state: typeof MessagesAnnotation.State) {
+  async function researchNode(state: typeof MessagesAnnotation.State) {
     onLog("Analyst is researching...");
     const response = await researchModel.invoke(state.messages);
-    const responseText =
-      typeof response.content === "string" ? response.content : JSON.stringify(response.content);
-
-    let parsed: any;
-    try {
-      parsed = extractJson(responseText);
-    } catch {
-      // JSON parsing failed — ask the model to retry
-      onLog("Model output wasn't valid JSON, retrying...");
-      return {
-        messages: [
-          new AIMessage(responseText),
-          new HumanMessage(
-            "Your last reply wasn't valid JSON. Remember: reply with ONLY a JSON object, no prose, no markdown fences. Try again."
-          ),
-        ],
-      };
-    }
-
-    const action = parsed.action;
-
-    if (action === "finish") {
-      onLog("Research complete.");
-      return {
-        messages: [new AIMessage(responseText)],   // keep the raw JSON, not parsed.brief
-      };
-    }
-
-    if (action === "web_search" && parsed.query) {
-      onLog(`Searching web: "${parsed.query}"`);
-      const result = await webSearch(parsed.query);
-      return {
-        messages: [
-          new AIMessage(responseText),
-          new HumanMessage(`Tool result for web_search("${parsed.query}"):\n\n${result}`),
-        ],
-      };
-    }
-
-    if (action === "stock_quote" && parsed.ticker) {
-      onLog(`Looking up stock quote: ${parsed.ticker}`);
-      const result = await stockQuote(parsed.ticker);
-      return {
-        messages: [
-          new AIMessage(responseText),
-          new HumanMessage(`Tool result for stock_quote("${parsed.ticker}"):\n\n${result}`),
-        ],
-      };
-    }
-
-    // Unknown action — ask the model to retry
-    onLog("Model output had unknown action, retrying...");
-    return {
-      messages: [
-        new AIMessage(responseText),
-        new HumanMessage(
-          `Unknown action "${action}". Valid actions are: web_search, stock_quote, finish. Reply with ONLY a JSON object.`
-        ),
-      ],
-    };
+    return { messages: [response] };
   }
 
   function shouldContinue(state: typeof MessagesAnnotation.State) {
-    const last = state.messages[state.messages.length - 1];
-    const lastContent =
-      typeof last.content === "string" ? last.content : JSON.stringify(last.content);
-
-    if (last._getType() === "ai") {
-      try {
-        const parsed = extractJson(lastContent);
-        if ((parsed as any).action === "finish") return END;
-      } catch {
-        // not valid JSON — loop back, but still subject to the cap below
+    const last = state.messages[state.messages.length - 1] as AIMessage;
+    const toolCallCount = state.messages.filter(
+      (m) => m instanceof AIMessage && m.tool_calls?.length
+    ).length;
+    if (last.tool_calls && last.tool_calls.length > 0 && toolCallCount < MAX_RESEARCH_STEPS) {
+      for (const call of last.tool_calls) {
+        if (call.name === "web_search" && call.args?.query) {
+          onLog(`Searching web: "${call.args.query}"`);
+        } else if (call.name === "stock_quote" && call.args?.ticker) {
+          onLog(`Fetching stock quote: "${call.args.ticker}"`);
+        }
       }
+      return "tools";
     }
-
-    // Count every agent turn (any AI message), not just successful tool calls —
-    // this guarantees termination even if the model gets stuck on bad JSON/unknown actions.
-    const agentTurnCount = state.messages.filter((m) => m._getType() === "ai").length;
-    if (agentTurnCount >= MAX_RESEARCH_STEPS) {
-      return END;
-    }
-
-    return "agent";
+    return END;
   }
 
   const researchGraph = new StateGraph(MessagesAnnotation)
-    .addNode("agent", agentNode)
+    .addNode("agent", researchNode)
+    .addNode("tools", toolNode)
     .addEdge(START, "agent")
-    .addConditionalEdges("agent", shouldContinue, { agent: "agent", [END]: END })
+    .addConditionalEdges("agent", shouldContinue, { tools: "tools", [END]: END })
+    .addEdge("tools", "agent")
     .compile();
 
   return researchGraph;
@@ -115,7 +54,7 @@ function buildGraph(onLog: (line: string) => void) {
 
 export async function runInvestmentResearch(
   companyName: string,
-  onLog: (line: string) => void = () => { }
+  onLog: (line: string) => void = () => {}
 ): Promise<AgentRunResult> {
   const start = Date.now();
   const sources: Source[] = [];
@@ -131,22 +70,13 @@ export async function runInvestmentResearch(
   });
 
   const lastMessage = researchResult.messages[researchResult.messages.length - 1];
-  let researchBrief =
+  const researchBrief =
     typeof lastMessage.content === "string" ? lastMessage.content : JSON.stringify(lastMessage.content);
 
-  // If the last message is a JSON finish action, extract the brief
-  try {
-    const parsed = extractJson(researchBrief);
-    if ((parsed as any).action === "finish" && (parsed as any).brief) {
-      researchBrief = (parsed as any).brief;
-    }
-  } catch {
-    // Not JSON — use as-is
-  }
-
+  onLog("Research complete.");
   onLog("Research complete. Handing brief to Investment Committee for a decision...");
 
-  // --- Decision step: call ChatReplicate, parse JSON, validate with Zod, retry once on failure ---
+  // --- Decision step: call ChatReplicate (no tools), parse JSON, validate with Zod, retry once ---
   const decisionModel = new ChatReplicate({ temperature: 0.1 });
 
   const decisionMessages = [

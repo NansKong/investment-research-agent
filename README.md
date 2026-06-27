@@ -87,13 +87,12 @@ on the Node.js runtime, with `maxDuration` raised to 120s since multi-step resea
                                               ┌─────────────────────────────────┐
                                               │   LangGraph.js StateGraph        │
                                               │                                   │
-                                              │   ┌────────┐  JSON action         │
-                                              │   │ agent  │──── parse ──┐        │
-                                              │   │(Repli- │◀── result ──┤        │
-                                              │   │ cate)  │             │        │
-                                              │   └───┬────┘   webSearch()        │
-                                              │       │        stockQuote()       │
-                                              │       │ action = "finish"         │
+                                              │   ┌────────┐ tool_calls ┌──────┐  │
+                                              │   │ agent  │──────────▶│ tools │  │
+                                              │   │(Repli- │◀──────────│ node  │  │
+                                              │   │ cate)  │  results  └──────┘  │
+                                              │   └───┬────┘                      │
+                                              │       │ no more tool calls        │
                                               │       ▼                            │
                                               │  research brief (text)            │
                                               └───────────────┬───────────────────┘
@@ -106,27 +105,27 @@ on the Node.js runtime, with `maxDuration` raised to 120s since multi-step resea
                                               └─────────────────────────────────┘
 ```
 
-- **LLM provider** — `ChatReplicate`, a custom `SimpleChatModel` subclass
+- **LLM provider** — `ChatReplicate`, a custom `BaseChatModel` subclass
   (`lib/agent/chat-replicate.ts`) that calls Replicate's hosted `openai/gpt-4.1-mini`. It
-  extends LangChain's `SimpleChatModel` so it plugs into `.invoke(state.messages)` the same
-  way `ChatOpenAI` would. No OpenAI or Anthropic API keys are needed.
-- **Research phase** — a `StateGraph` (LangGraph.js) with a single `agent` node. Instead of
-  native tool calling + `ToolNode`, the agent outputs one JSON action per turn
-  (`{"action": "web_search", "query": "..."}`, `{"action": "stock_quote", "ticker": "..."}`,
-  or `{"action": "finish", "brief": "..."}`). The graph loop parses the JSON with
-  `extractJson()`, dispatches the corresponding plain async function, appends the result as
-  a `HumanMessage`, and loops back. If the model returns invalid JSON, a retry message is
-  appended and it loops back — with a hard cap of 5 agent turns (total AI messages) to
-  guarantee termination even if the model gets stuck.
-- **Tools**: `webSearch()` (Tavily REST API — real, current web results) and `stockQuote()`
-  (a free, no-key Stooq lookup for a quick public-market sanity check). Both are plain
-  `async` functions — no LangChain `tool()` wrapper — called directly by the graph loop
-  based on the parsed action.
-- **Decision phase** — a second `ChatReplicate` call (temperature 0.1), *not* in the graph
-  loop, that receives only the finished research brief. Instead of `.withStructuredOutput()`,
-  the raw response is parsed with `extractJson()` and validated with
-  `InvestmentDecisionSchema.safeParse()`. On validation failure, the error is fed back and
-  the model retries once.
+  extends LangChain's `BaseChatModel` and implements `bindTools()` + `_generate()` to
+  emulate native function-calling: tool schemas are injected into the system prompt, and the
+  model's JSON response is parsed into `AIMessage.tool_calls` automatically. This means
+  `ToolNode`, `bindTools()`, and `tool()` all work the standard LangChain way — if you ever
+  swap to a real function-calling provider, only `chat-replicate.ts` changes.
+- **Research phase** — a `StateGraph` (LangGraph.js) with two nodes: `agent` (the LLM,
+  bound to tools via `bindTools`) and `tools` (a standard `ToolNode` that dispatches
+  whichever tools the LLM called). A conditional edge keeps looping `agent → tools → agent`
+  until the model stops calling tools (or hits a safety cap of 10 tool-calling turns), at
+  which point it must have written a plain-text research brief. This is a standard ReAct
+  pattern, kept deliberately small and inspectable.
+- **Tools**: `web_search` (Tavily REST API — real, current web results) and `stock_quote`
+  (a free, no-key Stooq lookup for a quick public-market sanity check). Both use standard
+  LangChain `tool()` wrappers with Zod schemas, so `ToolNode` dispatches them automatically.
+  The model decides when and how many times to call each.
+- **Decision phase** — a second `ChatReplicate` call (temperature 0.1, no tools bound),
+  *not* in the tool loop, that receives only the finished research brief. The raw response
+  is parsed with `extractJson()` and validated with `InvestmentDecisionSchema.safeParse()`.
+  On validation failure, the Zod error is fed back and the model retries once.
 - **Streaming** — the route handler returns a `ReadableStream` of newline-delimited JSON:
   `{"type":"log", ...}` lines as the agent works, then one `{"type":"result", ...}` line
   with the full structured payload (or `{"type":"error", ...}` on failure). The frontend
@@ -149,10 +148,10 @@ components/
   VerdictStamp.tsx         the rotated INVEST/PASS/WATCH stamp
   ResearchMemo.tsx         full memo layout (thesis, bull/bear, risks, sources…)
 lib/agent/
-  chat-replicate.ts        ChatReplicate — SimpleChatModel wrapper around Replicate
+  chat-replicate.ts        ChatReplicate — BaseChatModel wrapper with emulated bindTools()
   json-utils.ts            extractJson() — pull JSON from free-form model output
   types.ts                 Zod schema for the structured decision + shared types
-  tools.ts                 webSearch() + stockQuote() — plain async functions
+  tools.ts                 web_search + stock_quote tool definitions (LangChain tool() wrappers)
   prompts.ts               system prompts for research vs. decision phases
   graph.ts                 the LangGraph StateGraph + orchestration logic
 ```
@@ -164,25 +163,23 @@ lib/agent/
 - **Replicate instead of direct OpenAI/Anthropic API keys.** Using `openai/gpt-4.1-mini`
   hosted on Replicate means only one API token is needed, with no separate OpenAI or
   Anthropic billing. The trade-off is slightly higher latency per prediction (Replicate
-  cold-start/queue time) and no native tool calling — which is why the agent uses a
-  JSON-action protocol instead.
-- **JSON-action protocol instead of native tool calling.** Since Replicate's model hosting
-  doesn't support OpenAI-style `tool_calls` in the response, the agent prompt instructs the
-  model to reply with a JSON object specifying the action. `extractJson()` parses it, with
-  retry logic for malformed output. This is simpler than it sounds and works reliably with
-  `gpt-4.1-mini`, at the cost of needing a retry path for the occasional non-JSON response.
-- **Plain async functions instead of LangChain `tool()` wrappers.** Without native tool
-  calling, `ToolNode` is unnecessary. `webSearch()` and `stockQuote()` are just async
-  functions called directly in the graph loop — same fetch logic, less abstraction.
+  cold-start/queue time) and no native tool calling — which is why `ChatReplicate` emulates
+  it via text-prompted JSON.
+- **Emulated tool calling inside the model wrapper, not the graph.** Replicate has no native
+  function-calling API, but `ChatReplicate.bindTools()` injects tool schemas into the system
+  prompt and `_generate()` parses the model's JSON response into standard `tool_calls`
+  arrays. This keeps the graph/orchestration layer provider-agnostic — `graph.ts` uses the
+  exact same `bindTools` + `ToolNode` pattern it would with `ChatOpenAI`, and swapping back
+  to a real function-calling model later only requires changing the model class.
 - **Two-phase agent (research → decide) instead of one giant agent loop.** A single agent
   that researches *and* decides in the same loop tends to lock in a verdict early and
   rationalize backward as it keeps searching. Splitting "gather" from "judge" into two LLM
   calls, with the judgment call validated through a Zod schema, produced more consistent,
   better-grounded verdicts in testing — at the cost of an extra LLM call per run.
-- **Zod `safeParse` + retry instead of `.withStructuredOutput()`.** Since `ChatReplicate`
-  doesn't support structured output natively, the decision step calls the model, extracts
-  JSON, runs `safeParse`, and on failure feeds the Zod validation errors back into the
-  prompt for one retry. This handles the same role with explicit error recovery.
+- **Zod `safeParse` + retry for the decision step.** The decision model has no tools bound,
+  so it outputs plain text. `extractJson()` + `safeParse()` validate the structure, and on
+  failure the Zod errors are fed back for one retry. This is simpler and more transparent
+  than trying to emulate `.withStructuredOutput()`.
 - **Direct REST call to Tavily instead of `@langchain/community`'s wrapper.** The community
   package pulls in a long, fragile dependency tree (it transitively wants `better-sqlite3`,
   `typeorm`, etc. for unrelated integrations) that caused peer-dependency resolution errors.
@@ -191,9 +188,6 @@ lib/agent/
 - **NDJSON streaming over a hand-rolled WebSocket/SSE setup.** Good enough to show live
   progress without pulling in a pub/sub layer or a separate server process — appropriate
   for a single-request, single-response agent run.
-- **Agent turn cap (5) instead of tool-call cap.** The safety limit counts every AI message,
-  not just successful tool calls. This guarantees termination even if the model gets stuck
-  on bad JSON or unknown actions — it won't loop forever.
 - **No persistence / no auth / no multi-turn chat.** Optimized for the one flow of "takes a
   company name, researches, decides" being solid rather than spreading effort across a login
   system, a history page, or a database.
@@ -204,7 +198,7 @@ lib/agent/
   free spot-quote lookup.
 - Parallel/fan-out search (multiple `web_search` calls issued concurrently per turn) instead
   of one tool call at a time, to cut latency.
-- A "show your work" expandable view of the full research brief and raw action/response
+- A "show your work" expandable view of the full research brief and raw tool call/response
   trace (the data is already collected in `researchLog` — it's just not surfaced in the UI).
 - Caching identical company queries for some TTL, since a re-run today should mostly agree
   with a re-run an hour ago.
@@ -274,6 +268,70 @@ actually find.)*
 
 ---
 
+## Recent changes
+
+### Download report as PDF
+
+Users can now download the full investment memo as a PDF that looks exactly like the web
+version. A "Download Report" button appears in the memo header (next to the verdict stamp)
+once the analysis completes. Clicking it opens the browser's print dialog — choose
+"Save as PDF" to export. The PDF includes all memo sections (thesis, bull/bear case,
+financial snapshot, risks, catalysts, sources) with the same styling, verdict stamp, and
+layout as the web view. Source URLs are automatically appended to links in the PDF.
+
+**Files added:** `lib/download-report.ts`
+**Files changed:** `components/ResearchMemo.tsx`, `app/globals.css`
+
+### Clean progress log messages
+
+Replaced raw, noisy log output like `Calling tool: web_search ({"query":"..."})` and
+repeated `Analyst is researching...` lines with clean, human-readable progress messages:
+
+```
+Starting research on "Shopify"
+Analyst is researching...
+Searching web: "Shopify company overview business model"
+Analyst is researching...
+Searching web: "Shopify latest financial results 2024"
+Analyst is researching...
+Fetching stock quote: "SHOP"
+Analyst is researching...
+Research complete.
+Research complete. Handing brief to Investment Committee for a decision...
+› Decision rendered.
+```
+
+**Files changed:** `lib/agent/graph.ts`
+
+### Tool-call context preserved in message history
+
+Fixed a bug in `ChatReplicate._generate()` where AIMessages containing tool calls had empty
+`content` — so on the next turn, the model saw `"ai: "` (blank) followed by a raw tool
+result with no indication of what it asked for or which tool produced it. Over multi-step
+research loops this caused the model to lose track of prior queries, repeat searches, or
+misattribute results.
+
+The message history reconstruction now properly serializes:
+- **Tool-calling turns:** `ai: [called tool: web_search({"query":"..."})]`
+- **Tool result turns:** `tool result (web_search): <result text>`
+
+**Files changed:** `lib/agent/chat-replicate.ts`
+
+### Prompt alignment for research termination
+
+The research system prompt previously told the model to _"STOP calling tools and write a
+concise research brief in plain text"_, but `ChatReplicate`'s injected tool instructions
+require the model to use `{"final_answer": "..."}` format when finishing. These conflicting
+instructions caused inconsistent termination behavior across runs, especially with smaller
+models.
+
+The research prompt now defers to the tool-calling format: _"give your `final_answer` (per
+the tool-calling format instructions you've been given)"_ — eliminating the ambiguity.
+
+**Files changed:** `lib/agent/prompts.ts`
+
+---
+
 ## What I would improve with more time
 
 1. **Surface the full research trace in the UI** (collapsible "show the analyst's notes"
@@ -286,5 +344,4 @@ actually find.)*
    they ship.
 5. **Memory across a session** — let a user ask a follow-up question about the memo
    ("what about their debt load?") without re-running the whole pipeline from scratch.
-6. **Bump `MAX_RESEARCH_STEPS`** once latency is optimized — 5 turns is a conservative cap;
-   more turns would allow deeper research coverage.
+

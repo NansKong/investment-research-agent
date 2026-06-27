@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentRunResult } from "@/lib/agent/types";
+import { downloadReport } from "@/lib/download-report";
 import VerdictStamp from "./VerdictStamp";
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
@@ -16,7 +17,7 @@ export default function ResearchMemo({ result }: { result: AgentRunResult }) {
   const { decision, sources, durationMs } = result;
 
   return (
-    <div className="hairline border bg-paper p-6 sm:p-10">
+    <div data-memo className="hairline border bg-paper p-6 sm:p-10">
       <header className="hairline mb-6 flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="text-xs uppercase tracking-[0.25em] text-ink/50">Research Desk — Investment Memo</div>
@@ -29,7 +30,22 @@ export default function ResearchMemo({ result }: { result: AgentRunResult }) {
             · {(durationMs / 1000).toFixed(1)}s research time
           </div>
         </div>
-        <VerdictStamp verdict={decision.verdict} confidence={decision.confidence} />
+        <div className="flex flex-col items-end gap-3">
+          <VerdictStamp verdict={decision.verdict} confidence={decision.confidence} />
+          <button
+            id="download-report-btn"
+            onClick={() => downloadReport()}
+            className="inline-flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] transition-all duration-200 hover:bg-ink hover:text-paper hairline print:hidden"
+            style={{ borderColor: "var(--hairline)", color: "var(--ink)" }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download Report
+          </button>
+        </div>
       </header>
 
       <div className="space-y-6">
