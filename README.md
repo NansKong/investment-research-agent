@@ -218,36 +218,82 @@ over time.
 
 ### 1. "Anduril Industries" → `WATCH`
 
-> **Thesis:** Anduril has built genuine defense-tech credibility and a fast-growing
-> contract book, but as a private company its financials are opaque and its valuation is
-> set entirely by future funding rounds, not earnings — a real story, but not yet a
-> priceable one for a public-equity-style verdict.
+> **Thesis:** Anduril Industries is a rapidly growing private defense technology company specializing in AI-powered autonomous systems with strong backing and a disruptive approach in a traditionally slow-moving industry. Its proprietary Lattice platform and recent large funding rounds position it well for scaling and innovation. However, as a private company with significant regulatory, execution, and reputational risks, and no public financials, a near-term trigger such as a potential IPO or major contract awards would clarify investment prospects.
 >
-> **Bull case:** Multiple large government contracts; founder-led with deep pockets and a
-> credible track record (Palmer Luckey/Oculus); positioned in a structurally growing
-> category (autonomous defense systems) with bipartisan political tailwinds.
-> **Bear case:** Single-customer-type concentration risk (government budgets, procurement
-> cycles); no public financials to verify margins or burn rate; valuation set by
-> momentum-driven private funding rounds rather than fundamentals.
-> **Key risks:** Defense procurement is slow and politically exposed; private-market
-> liquidity is limited for outside investors; reliance on continued large funding rounds.
-> **Catalysts:** Any future IPO filing or audited financial disclosure would resolve most
-> of the "WATCH" uncertainty.
-
-### 2. "Peloton Interactive" → `PASS`
-
-> **Thesis:** Peloton's post-pandemic demand collapse exposed a hardware-subscription
-> model that doesn't have the retention economics it assumed during 2020–2021, and
-> repeated turnaround attempts haven't yet produced durable profitability.
+> **Recommendation rationale:** Given Anduril's impressive growth, strong technology platform, and significant funding, the company shows great promise in the defense tech sector. However, as a private company with substantial regulatory, execution, and reputational risks, and no public financial disclosures, the investment decision would benefit from near-term clarity on an IPO or major contract wins. Therefore, a WATCH rating is appropriate to monitor these key developments before committing capital.
 >
-> **Bull case:** Strong brand recognition; large installed base of existing hardware
-> owners; subscription revenue is stickier than hardware revenue once someone owns a bike.
-> **Bear case:** Demand pulled forward during the pandemic, leaving a smaller realistic
-> long-term market; repeated leadership and strategy changes; hardware margins remain
-> structurally thin.
-> **Key risks:** Continued subscriber churn; competitive pressure from lower-cost
-> alternatives (gyms reopening, cheaper connected-fitness entrants); execution risk on yet
-> another turnaround plan.
+> **Bull case:**
+> - Strong growth evidenced by multiple large funding rounds raising over $9 billion and valuations rising from $14B to $61B within two years.
+> - Proprietary AI-driven Lattice platform integrates multiple autonomous defense systems, providing a competitive moat.
+> - Contracts with U.S. Air Force and Army Defense Innovation Unit validate technology and market acceptance.
+> - Recognized as a top disruptor in defense tech, indicating strong innovation and market positioning.
+> - Leadership stability with founders in key roles supports continuity and vision execution.
+>
+> **Bear case:**
+> - Significant regulatory risks including export controls and government procurement regulations could limit sales and growth.
+> - Competition from both established defense contractors and emerging startups could pressure market share and margins.
+> - Execution risks related to scaling manufacturing and maintaining technological leadership in a fast-evolving sector.
+> - Key-person risk due to heavy reliance on founders for innovation and leadership.
+> - Potential reputational risks from political associations and militarization controversies could impact public and government support.
+>
+> **Financial snapshot:**
+> - **Total Capital Raised:** $9+ billion (Indicates strong investor confidence and ample runway for growth)
+> - **Latest Valuation:** $61 billion (Reflects rapid valuation growth and market enthusiasm for defense tech innovation)
+>
+> **Competitive position:** Anduril holds a strong competitive position as a disruptor in defense technology with its proprietary AI platform and integrated autonomous systems, differentiating itself from traditional defense contractors by leveraging Silicon Valley innovation and rapid development cycles. However, it faces competition from both established players and emerging startups.
+>
+> **Key risks:**
+> - Regulatory constraints on defense technology exports and government procurement.
+> - Execution challenges in scaling manufacturing and technology development.
+> - Dependence on founders for leadership and innovation.
+> - Reputational risks from political and militarization controversies.
+> - Intense competition from both legacy defense contractors and new entrants.
+>
+> **Catalysts to watch:**
+> - Potential IPO or public listing providing valuation transparency and liquidity.
+> - Major contract awards from U.S. or allied defense agencies.
+> - Demonstration of successful scaling of manufacturing and deployment of autonomous systems.
+> - Regulatory developments impacting defense technology sales.
+
+### 2. "Spotify Technology S.A." → `INVEST`
+
+> **Thesis:** Spotify is the global leader in music streaming with a strong market share and diversified revenue streams from subscriptions and advertising. The company has demonstrated consistent revenue growth and recently achieved profitability, signaling improved operational efficiency. Its broad content ecosystem, including podcasts, and strong personalization capabilities provide a durable competitive advantage despite intense competition.
+>
+> **Recommendation rationale:** Given Spotify's dominant market position, consistent revenue growth, and recent profitability, the company is well-positioned to capitalize on the growing audio streaming market. While regulatory and competitive risks exist, the company's scale, diversified revenue streams, and ongoing efficiency initiatives mitigate these concerns. Therefore, an INVEST recommendation is warranted with a strong confidence level.
+>
+> **Bull case:**
+> - Largest global market share in music streaming at approximately 32.9%, well ahead of competitors.
+> - Consistent revenue growth from €2.94 billion in 2016 to an estimated €15.62 billion in 2024, with first net profit reported in 2024.
+> - Diversified revenue model combining premium subscriptions and advertising monetization.
+> - Strong brand recognition and scale create high barriers to entry for new competitors.
+> - Recent organizational restructuring and workforce reductions aimed at improving efficiency and profitability.
+>
+> **Bear case:**
+> - Significant regulatory risks related to music licensing and royalty costs that impact margins.
+> - Intense competition from large tech companies like Apple Music, Amazon Music, and Tencent Music with deep pockets and ecosystem advantages.
+> - Execution risks in maintaining innovation, user growth, and cost management simultaneously.
+> - Key-person risk centered on CEO Daniel Ek and senior leadership continuity.
+> - Potential erosion of market share due to aggressive competitor strategies.
+>
+> **Financial snapshot:**
+> - **Annual Revenue (2024 est.):** €15.62 billion (Strong growth from €2.94 billion in 2016)
+> - **Q1 2026 Revenue:** $5.305 billion (20.19% year-over-year increase)
+> - **Profitability:** First net profit reported in 2024 (Indicates successful monetization and margin expansion)
+>
+> **Competitive position:** Spotify holds a leading position with the largest global market share in music streaming, supported by a broad content offering including podcasts, strong personalization algorithms, and a large user base. Its scale and brand recognition create high barriers to entry, though competition from large tech firms remains a threat.
+>
+> **Key risks:**
+> - Regulatory risks related to music licensing and royalty costs.
+> - Competition from well-funded tech giants with ecosystem advantages.
+> - Execution risk in balancing innovation, growth, and cost control.
+> - Dependence on CEO Daniel Ek and senior leadership stability.
+> - Market share erosion from aggressive competitors.
+>
+> **Catalysts to watch:**
+> - Continued rollout of new features and podcast content expansion.
+> - Further margin improvement and profitability in upcoming quarters.
+> - Potential strategic partnerships or acquisitions to enhance content and technology.
+> - Regulatory developments impacting licensing costs.
 
 ### 3. "A profitable, debt-free regional bakery chain (hypothetical, 40 locations, steady 8% YoY same-store growth)" → `INVEST`
 
