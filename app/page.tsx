@@ -92,7 +92,7 @@ export default function Home() {
       </div>
 
       <footer className="mt-16 text-center text-xs text-ink/30">
-        Built with Next.js, LangChain.js &amp; LangGraph.js. Not investment advice.
+        Built with AI systems. Not investment advice.
       </footer>
     </main>
   );
